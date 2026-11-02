@@ -600,6 +600,25 @@
     }
     .apply-btn:hover { opacity: 0.9; }
 
+    
+    .job-card.is-inactive {
+      opacity: 0.55;
+      filter: grayscale(0.4);
+      border-color: #475569;
+    }
+    .job-card.is-inactive:hover {
+      opacity: 0.9;
+      filter: none;
+    }
+    .status-badge-inactive {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      background: rgba(255,255,255,0.08);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    
     /* Insights Section */
     .insights-panel {
       background: var(--surface);
@@ -805,12 +824,16 @@
           <label>Application Status</label>
           <select id="statusFilter" class="filter-select">
             <option value="all">All Statuses</option>
+            <option value="active">Active Leads (New / Saved / Applied)</option>
             <option value="New Match">New Match</option>
             <option value="Saved">Saved</option>
             <option value="Applied">Applied</option>
             <option value="Interview Scheduled">Interview Scheduled</option>
-            <option value="Rejected">Rejected</option>
             <option value="Offer">Offer</option>
+            <option value="Expired / Closed">Expired / Closed</option>
+            <option value="Link Broken">Link Broken / 404</option>
+            <option value="Not Interested">Not Interested</option>
+            <option value="Rejected">Rejected</option>
           </select>
         </div>
         <div class="filter-item">
@@ -1870,7 +1893,14 @@
           if (modeVal === 'Remote' && !job.work_mode.toLowerCase().includes('remote') && !job.work_mode.toLowerCase().includes('wfh')) return false;
           if (modeVal === 'Hybrid' && !job.work_mode.toLowerCase().includes('hybrid')) return false;
         }
-        if (statusVal !== 'all' && (job.status || 'New Match') !== statusVal) return false;
+        if (statusVal !== 'all') {
+          const currentStatus = job.status || 'New Match';
+          if (statusVal === 'active') {
+            if (['Expired / Closed', 'Link Broken', 'Not Interested', 'Rejected'].includes(currentStatus)) return false;
+          } else if (currentStatus !== statusVal) {
+            return false;
+          }
+        }
 
         return true;
       });
@@ -1900,7 +1930,8 @@
         else if (job.match_score >= 80) scoreClass = 'score-strong';
 
         const card = document.createElement('div');
-        card.className = `job-card ${isTop5 ? 'top5-highlight' : ''}`;
+        const isInactive = ['Expired / Closed', 'Link Broken', 'Not Interested', 'Rejected'].includes(job.status);
+        card.className = `job-card ${isTop5 ? 'top5-highlight' : ''} ${isInactive ? 'is-inactive' : ''}`;
 
         card.innerHTML = `
           <div class="card-header">
@@ -1942,13 +1973,16 @@
           ` : ''}
 
           <div class="card-footer">
-            <select class="status-select" onchange="handleStatusChange('${job.company.replace(/'/g, "\\'")}', '${job.title.replace(/'/g, "\\'")}', this.value)">
-              <option value="New Match" ${job.status === 'New Match' || !job.status ? 'selected' : ''}>New Match</option>
-              <option value="Saved" ${job.status === 'Saved' ? 'selected' : ''}>Saved</option>
-              <option value="Applied" ${job.status === 'Applied' ? 'selected' : ''}>Applied</option>
-              <option value="Interview Scheduled" ${job.status === 'Interview Scheduled' ? 'selected' : ''}>Interview Scheduled</option>
-              <option value="Rejected" ${job.status === 'Rejected' ? 'selected' : ''}>Rejected</option>
-              <option value="Offer" ${job.status === 'Offer' ? 'selected' : ''}>Offer</option>
+            <select class="status-select" onchange="handleStatusChange('${job.company.replace(/'/g, "\'")}', '${job.title.replace(/'/g, "\'")}', this.value)">
+              <option value="New Match" ${(!job.status || job.status === 'New Match') ? 'selected' : ''}>⚡ New Match</option>
+              <option value="Saved" ${job.status === 'Saved' ? 'selected' : ''}>⭐ Saved</option>
+              <option value="Applied" ${job.status === 'Applied' ? 'selected' : ''}>✅ Applied</option>
+              <option value="Interview Scheduled" ${job.status === 'Interview Scheduled' ? 'selected' : ''}>📅 Interview Scheduled</option>
+              <option value="Offer" ${job.status === 'Offer' ? 'selected' : ''}>🎉 Offer Received</option>
+              <option value="Expired / Closed" ${job.status === 'Expired / Closed' ? 'selected' : ''}>⏳ Expired / Closed</option>
+              <option value="Link Broken" ${job.status === 'Link Broken' ? 'selected' : ''}>⚠️ Link Broken / 404</option>
+              <option value="Not Interested" ${job.status === 'Not Interested' ? 'selected' : ''}>🚫 Not Interested</option>
+              <option value="Rejected" ${job.status === 'Rejected' ? 'selected' : ''}>❌ Rejected</option>
             </select>
 
             <a href="${job.app_url}" target="_blank" class="apply-btn">
