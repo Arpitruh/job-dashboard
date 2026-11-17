@@ -803,33 +803,33 @@
     <div class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-label">Filtered Jobs</div>
-        <div class="kpi-value" id="kpiFiltered">44</div>
+        <div class="kpi-value" id="kpiFiltered">0</div>
         <div class="kpi-desc">0–2 YOE (Noida, Pune, WFH)</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Top 25 Ranked</div>
-        <div class="kpi-value" id="kpiTotal">25</div>
+        <div class="kpi-label">Ranked Opportunities</div>
+        <div class="kpi-value" id="kpiTotal">0</div>
         <div class="kpi-desc">Scored with 100-point model</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Top Match</div>
-        <div class="kpi-value" id="kpiTopMatch">96%</div>
-        <div class="kpi-desc">Spektra Systems (Remote WFH)</div>
+        <div class="kpi-value" id="kpiTopMatch">—</div>
+        <div class="kpi-desc" id="kpiTopMatchDesc">Loading jobs...</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Average Score</div>
-        <div class="kpi-value" id="kpiAvgMatch">88.6%</div>
-        <div class="kpi-desc">Across all 25 positions</div>
+        <div class="kpi-value" id="kpiAvgMatch">—</div>
+        <div class="kpi-desc" id="kpiAvgMatchDesc">Across all ranked opportunities</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Location Fit</div>
-        <div class="kpi-value">100%</div>
-        <div class="kpi-desc">Noida (10) · Pune (7) · WFH (8)</div>
+        <div class="kpi-value" id="kpiLocationFit">—</div>
+        <div class="kpi-desc" id="kpiLocationFitDesc">Noida · Pune · Remote</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Salary Alignment</div>
-        <div class="kpi-value">₹8L - ₹22L</div>
-        <div class="kpi-desc">100% ≥ ₹8 LPA baseline</div>
+        <div class="kpi-label">Salary Visibility</div>
+        <div class="kpi-value" id="kpiSalaryData">—</div>
+        <div class="kpi-desc" id="kpiSalaryDataDesc">Roles with stated salary information</div>
       </div>
     </div>
 
@@ -888,14 +888,14 @@
           <label>Sort By</label>
           <select id="sortSelect" class="filter-select">
             <option value="score-desc">Match Score (Highest First)</option>
-            <option value="rank-asc">Rank (1 to 25)</option>
+            <option value="rank-asc">Rank (Ascending)</option>
             <option value="company-asc">Company Name</option>
             <option value="date-desc">Posted Date (Newest)</option>
           </select>
         </div>
       </div>
       <div class="results-count-bar">
-        <div>Showing <strong id="displayedCount">25</strong> of 25 Opportunities</div>
+        <div>Showing <strong id="displayedCount">0</strong> of <strong id="totalCount">0</strong> Opportunities</div>
         <div class="results-actions">
           <button type="button" id="refreshJobsBtn" class="refresh-jobs-btn" onclick="tryFetchSheetData(true)">🔄 Refresh Latest Jobs</button>
           <button type="button" id="clearFiltersBtn" class="clear-filters-btn">Reset Filters</button>
@@ -1870,7 +1870,7 @@
             const c = r.c;
             if (!c || !c[0] || !c[2] || !c[3]) return;
             const rankNum = Number(c[0].v);
-            if (!Number.isInteger(rankNum) || rankNum < 1 || rankNum > 50) return;
+            if (!Number.isSafeInteger(rankNum) || rankNum < 1) return;
 
             const scoreRaw = c[1] ? c[1].v : 0;
             const numericScore = Number(String(scoreRaw ?? '').replace('%', ''));
@@ -1927,7 +1927,7 @@
       } catch (err) {
         console.log('Using preloaded cache:', err);
         if (badge) {
-          badge.textContent = 'Cached Snapshot';
+          badge.textContent = `Sync Unavailable • Showing ${jobsData.length} Loaded Jobs`;
         }
       } finally {
         if (refreshBtn) {
@@ -1979,6 +1979,44 @@
       return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+    function updateSummaryKpis(filteredCount) {
+      const total = jobsData.length;
+      document.getElementById('kpiFiltered').textContent = filteredCount;
+      document.getElementById('kpiTotal').textContent = total;
+      document.getElementById('totalCount').textContent = total;
+
+      const topJob = jobsData.reduce((best, job) =>
+        !best || (Number(job.match_score) || 0) > (Number(best.match_score) || 0) ? job : best, null);
+      document.getElementById('kpiTopMatch').textContent =
+        topJob ? `${topJob.match_score}%` : '—';
+      document.getElementById('kpiTopMatchDesc').textContent =
+        topJob ? `${topJob.company} • ${topJob.location}` : 'No jobs loaded';
+
+      const average = total
+        ? jobsData.reduce((sum, job) => sum + (Number(job.match_score) || 0), 0) / total
+        : null;
+      document.getElementById('kpiAvgMatch').textContent =
+        average === null ? '—' : `${average.toFixed(1)}%`;
+      document.getElementById('kpiAvgMatchDesc').textContent =
+        `Across all ${total} ranked opportunities`;
+
+      const inTargetArea = jobsData.filter(job =>
+        /noida|ncr|delhi|pune|remote|india/i.test(String(job.location || '')) ||
+        /hybrid|remote|wfh/i.test(String(job.work_mode || ''))).length;
+      document.getElementById('kpiLocationFit').textContent =
+        total ? `${Math.round(100 * inTargetArea / total)}%` : '—';
+      document.getElementById('kpiLocationFitDesc').textContent =
+        `${inTargetArea} of ${total} in target locations or work modes`;
+
+      const disclosedSalary = jobsData.filter(job => {
+        const salary = String(job.salary || '').trim();
+        return salary && !/^(n\/?a|not disclosed|undisclosed|negotiable|competitive|unknown|—|-)$/i.test(salary);
+      }).length;
+      document.getElementById('kpiSalaryData').textContent = `${disclosedSalary} / ${total}`;
+      document.getElementById('kpiSalaryDataDesc').textContent =
+        'Roles with stated salary information';
+    }
+
     function renderJobs() {
       const grid = document.getElementById('jobsGrid');
       const searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -2031,6 +2069,7 @@
       }
 
       document.getElementById('displayedCount').textContent = filtered.length;
+      updateSummaryKpis(filtered.length);
       grid.innerHTML = '';
 
       if (filtered.length === 0) {
