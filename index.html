@@ -347,6 +347,8 @@
 
     .results-count-bar {
       display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
       justify-content: space-between;
       align-items: center;
       margin-top: 14px;
@@ -368,6 +370,26 @@
       display: inline-flex;
       align-items: center;
     }
+
+    .results-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .refresh-jobs-btn {
+      background: #2563eb;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 12px;
+      min-height: 36px;
+    }
+    .refresh-jobs-btn:hover:not(:disabled) { background: #1d4ed8; }
+    .refresh-jobs-btn:disabled { opacity: 0.65; cursor: wait; }
 
     /* Job Cards Grid */
     .jobs-grid {
@@ -561,8 +583,8 @@
     }
 
     .other-reason-input {
-      order: 3;
-      flex: 1 1 100%;
+      display: block;
+      margin-top: 10px;
       width: 100%;
       box-sizing: border-box;
       background: #0f172a;
@@ -850,7 +872,7 @@
           <select id="statusFilter" class="filter-select">
             <option value="all">All Statuses</option>
             <option value="active">Active Leads (New / Saved / Applied)</option>
-            <option value="New Match">New Match</option>
+            <option value="New Match" selected>Pending Action (New Match Only)</option>
             <option value="Saved">Saved</option>
             <option value="Applied">Applied</option>
             <option value="Interview Scheduled">Interview Scheduled</option>
@@ -874,7 +896,10 @@
       </div>
       <div class="results-count-bar">
         <div>Showing <strong id="displayedCount">25</strong> of 25 Opportunities</div>
-        <button id="clearFiltersBtn" class="clear-filters-btn">Reset Filters</button>
+        <div class="results-actions">
+          <button type="button" id="refreshJobsBtn" class="refresh-jobs-btn" onclick="tryFetchSheetData(true)">🔄 Refresh Latest Jobs</button>
+          <button type="button" id="clearFiltersBtn" class="clear-filters-btn">Reset Filters</button>
+        </div>
       </div>
     </div>
 
@@ -1818,8 +1843,14 @@
     // Auto-fetch newest jobs dynamically from Google Sheet on every page open
     const SHEET_ID = '1E6eu5vzQ95InC8XUzFQ5LLP48oWjALIyU8gfEJWDpVI';
 
-    async function tryFetchSheetData() {
+    async function tryFetchSheetData(isManual = false) {
       const badge = document.getElementById('liveSyncBadge');
+      const refreshBtn = document.getElementById('refreshJobsBtn');
+      if (refreshBtn?.disabled) return;
+      if (refreshBtn) {
+        refreshBtn.disabled = true;
+        if (isManual) refreshBtn.textContent = '⏳ Fetching Latest...';
+      }
       try {
         const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Job%20Match%20Portal&_t=${Date.now()}`;
         const res = await fetch(url, { cache: 'no-store' });
@@ -1827,7 +1858,10 @@
         const text = await res.text();
         const jsonStr = text.substring(text.indexOf('(') + 1, text.lastIndexOf(')'));
         const gviz = JSON.parse(jsonStr);
-        if (gviz && gviz.table && Array.isArray(gviz.table.rows)) {
+        if (!gviz || !gviz.table || !Array.isArray(gviz.table.rows)) {
+          throw new Error('Invalid Google Sheet response');
+        }
+        {
           const fallbackMap = new Map(
             jobsData.map(j => [(j.company + '||' + j.title).toLowerCase(), j.app_url])
           );
@@ -1894,6 +1928,11 @@
         console.log('Using preloaded cache:', err);
         if (badge) {
           badge.textContent = 'Cached Snapshot';
+        }
+      } finally {
+        if (refreshBtn) {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = '🔄 Refresh Latest Jobs';
         }
       }
     }
@@ -2062,13 +2101,13 @@
               <option value="Other" ${job.status === 'Other' ? 'selected' : ''}>📝 Other (Custom Reason)</option>
             </select>
 
-            ${job.status === 'Other' ? `
-              <input type="text" class="other-reason-input" placeholder="Enter custom reason..." aria-label="Custom reason" value="${escapeHtmlAttr(job.other_reason || '')}">
-            ` : ''}
             <a href="${job.app_url}" target="_blank" class="apply-btn">
               Apply Now ↗
             </a>
           </div>
+          ${job.status === 'Other' ? `
+            <input type="text" class="other-reason-input" placeholder="Enter custom reason..." aria-label="Custom reason" value="${escapeHtmlAttr(job.other_reason || '')}">
+          ` : ''}
         `;
         grid.appendChild(card);
         card.querySelector('.status-select').addEventListener('change', e => {
