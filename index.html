@@ -559,6 +559,24 @@
       }
     }
 
+    .other-reason-input {
+      order: 3;
+      flex: 1 1 100%;
+      width: 100%;
+      box-sizing: border-box;
+      background: #0f172a;
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      min-height: 40px;
+      font-size: 13px;
+      color: #f8fafc;
+    }
+    .other-reason-input:focus {
+      outline: 2px solid #818cf8;
+      outline-offset: 1px;
+    }
+    
     .status-select {
       background: #0f172a;
       border: 1px solid var(--surface-border);
@@ -737,6 +755,7 @@
             <span class="pulse-dot"></span>
             Daily Automation Active (9:00 AM IST)
           </div>
+          <div id="liveSyncBadge" class="schedule-badge" role="status" aria-live="polite">Cached Snapshot</div>
           <div class="btn-row">
             <a href="https://docs.google.com/spreadsheets/d/1E6eu5vzQ95InC8XUzFQ5LLP48oWjALIyU8gfEJWDpVI/edit" target="_blank" class="action-btn secondary">
               📊 Open Google Sheet
@@ -834,6 +853,7 @@
             <option value="Link Broken">Link Broken / 404</option>
             <option value="Not Interested">Not Interested</option>
             <option value="Rejected">Rejected</option>
+            <option value="Other">Other (Custom Reason)</option>
           </select>
         </div>
         <div class="filter-item">
@@ -1809,13 +1829,14 @@
           gviz.table.rows.forEach((r) => {
             const c = r.c;
             if (!c || !c[0] || !c[2] || !c[3]) return;
-            const rankNum = parseInt(c[0].v);
-            if (isNaN(rankNum) || rankNum < 1 || rankNum > 50) return;
+            const rankNum = Number(c[0].v);
+            if (!Number.isInteger(rankNum) || rankNum < 1 || rankNum > 50) return;
 
             const scoreRaw = c[1] ? c[1].v : 0;
-            const score = typeof scoreRaw === 'number'
-              ? Math.round(scoreRaw <= 1 ? scoreRaw * 100 : scoreRaw)
-              : parseInt(scoreRaw) || 85;
+            const numericScore = Number(String(scoreRaw ?? '').replace('%', ''));
+            const score = Number.isFinite(numericScore)
+              ? Math.round(numericScore <= 1 ? numericScore * 100 : numericScore)
+              : 85;
             const company = String(c[2].v || '').trim();
             const title = String(c[3].v || '').trim();
             const location = c[4] && c[4].v ? String(c[4].v).trim() : 'Remote';
@@ -1824,11 +1845,10 @@
             const salary = c[7] && c[7].v ? String(c[7].v).trim() : '₹8 LPA+';
 
             let rawUrl = c[8] && c[8].v ? String(c[8].v).trim() : '';
-            if (!rawUrl.startsWith('http')) {
+            if (!/^https:\/\//i.test(rawUrl)) {
               const fb = fallbackMap.get((company + '||' + title).toLowerCase());
-              rawUrl = fb || '#';
+              rawUrl = /^https:\/\//i.test(fb || '') ? fb : '#';
             }
-
             const matched_skills = c[9] && c[9].v
               ? String(c[9].v).split(',').map(s => s.trim()).filter(Boolean)
               : ['Next.js', 'React', 'TypeScript'];
@@ -1854,7 +1874,6 @@
             });
           });
 
-          if (parsedJobs.length >= 1) {
             jobsData = parsedJobs;
             loadSavedStatuses();
             renderJobs();
@@ -1864,7 +1883,6 @@
               badge.style.color = '#86efac';
               badge.style.borderColor = 'rgba(34, 197, 94, 0.45)';
             }
-          }
         }
       } catch (err) {
         console.log('Using preloaded cache:', err);
@@ -1875,22 +1893,20 @@
     }
 
     function loadSavedStatuses() {
-      const saved = localStorage.getItem('spark_job_statuses');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          jobsData.forEach(j => {
-            const key = j.company + '_' + j.title;
-            if (parsed[key]) {
-              j.status = parsed[key];
-            }
-          });
-        } catch(e) {
-          console.error(e);
-        }
-      }
+      let statuses = {};
+      let reasons = {};
+      try {
+        statuses = JSON.parse(localStorage.getItem('spark_job_statuses')) || {};
+      } catch (e) { console.error(e); }
+      try {
+        reasons = JSON.parse(localStorage.getItem('spark_job_other_reasons')) || {};
+      } catch (e) { console.error(e); }
+      jobsData.forEach(job => {
+        const key = job.company + '_' + job.title;
+        if (statuses[key]) job.status = statuses[key];
+        job.other_reason = typeof reasons[key] === 'string' ? reasons[key] : '';
+      });
     }
-
     function saveStatus(company, title, newStatus) {
       let saved = {};
       try {
@@ -1903,6 +1919,21 @@
       if (job) job.status = newStatus;
     }
 
+    function saveOtherReason(company, title, reason) {
+      let reasons = {};
+      try {
+        reasons = JSON.parse(localStorage.getItem('spark_job_other_reasons')) || {};
+      } catch (e) { console.error(e); }
+      reasons[company + '_' + title] = reason;
+      localStorage.setItem('spark_job_other_reasons', JSON.stringify(reasons));
+      const job = jobsData.find(j => j.company === company && j.title === title);
+      if (job) job.other_reason = reason;
+    }
+
+    function escapeHtmlAttr(value) {
+      return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
     function renderJobs() {
       const grid = document.getElementById('jobsGrid');
       const searchVal = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -1914,7 +1945,7 @@
 
       let filtered = jobsData.filter(job => {
         if (searchVal) {
-          const text = (job.company + ' ' + job.title + ' ' + job.location + ' ' + job.matched_skills.join(' ') + ' ' + job.why_matches).toLowerCase();
+          const text = (job.company + ' ' + job.title + ' ' + job.location + ' ' + job.matched_skills.join(' ') + ' ' + job.why_matches + ' ' + (job.other_reason || '')).toLowerCase();
           if (!text.includes(searchVal)) return false;
         }
         if (locVal !== 'all') {
@@ -2012,7 +2043,7 @@
           ` : ''}
 
           <div class="card-footer">
-            <select class="status-select" onchange="handleStatusChange('${job.company.replace(/'/g, "\'")}', '${job.title.replace(/'/g, "\'")}', this.value)">
+            <select class="status-select">
               <option value="New Match" ${(!job.status || job.status === 'New Match') ? 'selected' : ''}>⚡ New Match</option>
               <option value="Saved" ${job.status === 'Saved' ? 'selected' : ''}>⭐ Saved</option>
               <option value="Applied" ${job.status === 'Applied' ? 'selected' : ''}>✅ Applied</option>
@@ -2022,19 +2053,31 @@
               <option value="Link Broken" ${job.status === 'Link Broken' ? 'selected' : ''}>⚠️ Link Broken / 404</option>
               <option value="Not Interested" ${job.status === 'Not Interested' ? 'selected' : ''}>🚫 Not Interested</option>
               <option value="Rejected" ${job.status === 'Rejected' ? 'selected' : ''}>❌ Rejected</option>
+              <option value="Other" ${job.status === 'Other' ? 'selected' : ''}>📝 Other (Custom Reason)</option>
             </select>
 
+            ${job.status === 'Other' ? `
+              <input type="text" class="other-reason-input" placeholder="Enter custom reason..." aria-label="Custom reason" value="${escapeHtmlAttr(job.other_reason || '')}">
+            ` : ''}
             <a href="${job.app_url}" target="_blank" class="apply-btn">
               Apply Now ↗
             </a>
           </div>
         `;
         grid.appendChild(card);
+        card.querySelector('.status-select').addEventListener('change', e => {
+          handleStatusChange(job.company, job.title, e.target.value);
+        });
+        const otherReasonInput = card.querySelector('.other-reason-input');
+        if (otherReasonInput) {
+          otherReasonInput.addEventListener('input', e => saveOtherReason(job.company, job.title, e.target.value));
+        }
       });
     }
 
     function handleStatusChange(company, title, newStatus) {
       saveStatus(company, title, newStatus);
+      renderJobs();
     }
 
     document.getElementById('searchInput').addEventListener('input', renderJobs);
