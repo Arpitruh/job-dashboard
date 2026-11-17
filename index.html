@@ -1843,25 +1843,35 @@
     // Auto-fetch newest jobs dynamically from Google Sheet on every page open
     const SHEET_ID = '1E6eu5vzQ95InC8XUzFQ5LLP48oWjALIyU8gfEJWDpVI';
 
-    async function tryFetchSheetData(isManual = false) {
-      const badge = document.getElementById('liveSyncBadge');
-      const refreshBtn = document.getElementById('refreshJobsBtn');
-      if (refreshBtn?.disabled) return;
-      if (refreshBtn) {
-        refreshBtn.disabled = true;
-        if (isManual) refreshBtn.textContent = '⏳ Fetching Latest...';
+    let gvizSyncTimeout = null;
+    let gvizCallbackReceived = false;
+
+    function finishGvizSync() {
+      if (gvizSyncTimeout !== null) {
+        clearTimeout(gvizSyncTimeout);
+        gvizSyncTimeout = null;
       }
+      const button = document.getElementById('refreshJobsBtn');
+      if (button) {
+        button.disabled = false;
+        button.textContent = '🔄 Refresh Latest Jobs';
+      }
+    }
+
+    function showGvizSyncFailure(err) {
+      console.error('Google Sheet sync failed:', err);
+      const badge = document.getElementById('liveSyncBadge');
+      if (badge) badge.textContent = 'Sync Unavailable • Showing ' + jobsData.length + ' Loaded Jobs';
+      finishGvizSync();
+    }
+
+    window.onGvizSheetLoad = function(gviz) {
+      gvizCallbackReceived = true;
       try {
-        const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=Job%20Match%20Portal&_t=${Date.now()}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const text = await res.text();
-        const jsonStr = text.substring(text.indexOf('(') + 1, text.lastIndexOf(')'));
-        const gviz = JSON.parse(jsonStr);
-        if (!gviz || !gviz.table || !Array.isArray(gviz.table.rows)) {
+        if (!gviz || gviz.status === 'error' || !gviz.table || !Array.isArray(gviz.table.rows)) {
           throw new Error('Invalid Google Sheet response');
         }
-        {
+        const badge = document.getElementById('liveSyncBadge');
           const fallbackMap = new Map(
             jobsData.map(j => [(j.company + '||' + j.title).toLowerCase(), j.app_url])
           );
@@ -1870,7 +1880,7 @@
             const c = r.c;
             if (!c || !c[0] || !c[2] || !c[3]) return;
             const rankNum = Number(c[0].v);
-            if (!Number.isSafeInteger(rankNum) || rankNum < 1) return;
+            if (!Number.isSafeInteger(rankNum) || rankNum < 1 || rankNum > 100) return;
 
             const scoreRaw = c[1] ? c[1].v : 0;
             const numericScore = Number(String(scoreRaw ?? '').replace('%', ''));
@@ -1923,18 +1933,45 @@
               badge.style.color = '#86efac';
               badge.style.borderColor = 'rgba(34, 197, 94, 0.45)';
             }
-        }
       } catch (err) {
-        console.log('Using preloaded cache:', err);
-        if (badge) {
-          badge.textContent = `Sync Unavailable • Showing ${jobsData.length} Loaded Jobs`;
-        }
+        showGvizSyncFailure(err);
       } finally {
-        if (refreshBtn) {
-          refreshBtn.disabled = false;
-          refreshBtn.textContent = '🔄 Refresh Latest Jobs';
-        }
+        finishGvizSync();
       }
+    };
+
+    function tryFetchSheetData(isManual = false) {
+      const refreshBtn = document.getElementById('refreshJobsBtn');
+      if (refreshBtn && refreshBtn.disabled) return;
+      const oldScript = document.getElementById('gvizJsonpScript');
+      if (oldScript) oldScript.remove();
+
+      gvizCallbackReceived = false;
+      if (refreshBtn) {
+        refreshBtn.disabled = true;
+        if (isManual) refreshBtn.textContent = '⏳ Fetching Latest...';
+      }
+      const badge = document.getElementById('liveSyncBadge');
+      if (badge) badge.textContent = 'Syncing Google Sheet...';
+
+      const script = document.createElement('script');
+      script.id = 'gvizJsonpScript';
+      script.async = true;
+      script.src = 'https://docs.google.com/spreadsheets/d/' + SHEET_ID
+        + '/gviz/tq?tqx=responseHandler:onGvizSheetLoad&sheet=Job%20Match%20Portal&_t=' + Date.now();
+      script.onerror = () => showGvizSyncFailure(new Error('Google Sheet JSONP script load failed'));
+      script.onload = () => {
+        if (!gvizCallbackReceived) {
+          showGvizSyncFailure(new Error('Google Sheet did not call onGvizSheetLoad'));
+        }
+      };
+      gvizSyncTimeout = setTimeout(() => {
+        if (!gvizCallbackReceived) {
+          script.remove();
+          showGvizSyncFailure(new Error('Google Sheet sync timed out'));
+        }
+      }, 15000);
+      document.body.appendChild(script);
     }
 
     function loadSavedStatuses() {
